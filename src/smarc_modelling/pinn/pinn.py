@@ -43,10 +43,6 @@ def loss_function(model, x, Dv_comp, Mv_dot, Cv, g_eta, tau, nu):
     """
     Computes the physics-informed loss by comparing NN output with expected calculations
     Sums this with the data loss (Dv_comp - Dv_pred)
-
-    |   ||
-    ||  |_
-
     """
     
     # Getting the current prediction for D

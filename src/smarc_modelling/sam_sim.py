@@ -11,8 +11,8 @@ matplotlib.use('TkAgg')  # or 'Qt5Agg', depending on what you have installed
 
 ## MOD
 import pandas as pd
-pinn = False
-save = False
+pinn = True
+save = True
 
 # Initial conditions
 eta0 = np.zeros(7)
@@ -56,8 +56,8 @@ def run_simulation(t_span, x0, sam):
         u = np.zeros(6)
         u[0] = 50#*np.sin((i/(20/0.02))*(3*np.pi/4))        # VBS
         u[1] = 50 # LCG
-        #u[2] = np.deg2rad(7)    # Vertical (stern)
-        #u[3] = -np.deg2rad(7)   # Horizontal (rudder)
+        u[2] = np.deg2rad(7)    # Vertical (stern)
+        u[3] = -np.deg2rad(7)   # Horizontal (rudder)
         u[4] = 1000     # RPM 1
         u[5] = u[4]     # RPM 2
         return sam.dynamics(x, u)
@@ -83,11 +83,13 @@ def run_simulation(t_span, x0, sam):
     state_columns = ["Time", "x", "y", "z", "q0", "q1", "q2", "q3", "u", "v", "w", "p", "q", "r", "VBS", "LCG", "DS", "DR", "RPM1", "RPM2"]
     state_data = np.column_stack((t_eval, data.T))
     state_df = pd.DataFrame(state_data, columns=state_columns)
+
     if pinn and save:
         state_df.to_csv("src/smarc_modelling/pinn/data/pinn_results.csv", index=False)
+        print(f" System states saved to pinn_results.csv!")
     elif not pinn and save:
         state_df.to_csv("src/smarc_modelling/pinn/data/system_states.csv", index=False)
-    print(f" System states saved to system_output.csv!")
+        print(f" System states saved to system_output.csv!")
 
     return sol
 
