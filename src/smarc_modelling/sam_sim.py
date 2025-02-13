@@ -2,11 +2,17 @@ import numpy as np
 from smarc_modelling.vehicles import *
 from smarc_modelling.lib import *
 from smarc_modelling.vehicles.SAM import SAM
+from smarc_modelling.vehicles.SAM_PINN import SAM_PINN
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import mpl_toolkits.mplot3d.axes3d as p3
 matplotlib.use('TkAgg')  # or 'Qt5Agg', depending on what you have installed
+
+## MOD
+import pandas as pd
+pinn = False
+save = False
 
 # Initial conditions
 eta0 = np.zeros(7)
@@ -19,12 +25,15 @@ x0 = np.concatenate([eta0, nu0, u0])
 
 # Simulation timespan
 dt = 0.01 
-t_span = (0, 30)  # 20 seconds simulation
+t_span = (0, 30)  # 30 seconds simulation
 n_sim = int(t_span[1]/dt)
 t_eval = np.linspace(t_span[0], t_span[1], n_sim)
 
 # Create SAM instance
-sam = SAM(dt)
+if not pinn:
+    sam = SAM(dt)
+elif pinn:
+    sam = SAM_PINN(dt)
 
 class Sol():
     """
@@ -53,6 +62,7 @@ def run_simulation(t_span, x0, sam):
         u[5] = u[4]     # RPM 2
         return sam.dynamics(x, u)
 
+
     # Run integration
     print(f" Start simulation")
 
@@ -68,6 +78,16 @@ def run_simulation(t_span, x0, sam):
         data[:,i+1] = data[:,i] + dynamics_wrapper(i, data[:,i]) * (t_span[1]/n_sim)
     sol = Sol(t_eval,data)
     print(f" Simulation complete!")
+
+    ## MOD: Saving the states of the system
+    state_columns = ["Time", "x", "y", "z", "q0", "q1", "q2", "q3", "u", "v", "w", "p", "q", "r", "VBS", "LCG", "DS", "DR", "RPM1", "RPM2"]
+    state_data = np.column_stack((t_eval, data.T))
+    state_df = pd.DataFrame(state_data, columns=state_columns)
+    if pinn and save:
+        state_df.to_csv("src/smarc_modelling/pinn/data/pinn_results.csv", index=False)
+    elif not pinn and save:
+        state_df.to_csv("src/smarc_modelling/pinn/data/system_states.csv", index=False)
+    print(f" System states saved to system_output.csv!")
 
     return sol
 
@@ -203,7 +223,6 @@ def plot_trajectory(sol, numDataPoints, generate_gif=False, filename="3d.gif", F
         
         # Save the 3D animation as a gif file
         ani.save(filename, writer=animation.PillowWriter(fps=FPS))  
-
 
 # Run simulation and plot results
 sol = run_simulation(t_span, x0, sam)
