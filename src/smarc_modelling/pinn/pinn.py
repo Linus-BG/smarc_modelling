@@ -24,16 +24,20 @@ class PINN(nn.Module):
         super(PINN, self).__init__()
         # TODO: Just some random layers atm, check more into this later
         # Defining the layers
-        self.fc1 = nn.Linear(19, 64) # Neural network takes all 19 inputs for prediction
-        self.fc2 = nn.Linear(64, 128)
-        self.fc3 = nn.Linear(128, 64)
-        self.fc4 = nn.Linear(64, 36)
+        self.fc1 = nn.Linear(19, 32) # Neural network takes all 19 inputs for prediction
+        self.fc2 = nn.Linear(32, 64)
+        self.fc3 = nn.Linear(64, 128)
+        self.fc4 = nn.Linear(128, 128)
+        self.fc5 = nn.Linear(128, 64)
+        self.fc6 = nn.Linear(64, 36)
 
     def forward(self, x):
         x = torch.relu(self.fc1(x)) # TODO: Check different activation functions
         x = torch.relu(self.fc2(x))
         x = torch.relu(self.fc3(x))
-        A_flat = self.fc4(x)
+        x = torch.relu(self.fc4(x))
+        x = torch.relu(self.fc5(x))
+        A_flat = self.fc6(x)
         A_mat = A_flat.view(-1, 6, 6) # Go from just a row of values to matrix
         D = A_mat @ A_mat.transpose(-2, -1) # Enforce symmetry of D matrix
         return D
@@ -43,6 +47,7 @@ def loss_function(model, x, Dv_comp, Mv_dot, Cv, g_eta, tau, nu):
     """
     Computes the physics-informed loss by comparing NN output with expected calculations
     Sums this with the data loss (Dv_comp - Dv_pred)
+
     """
     
     # Getting the current prediction for D
@@ -88,7 +93,14 @@ def prepare_data(inputs, sam, u_ref):
     g_eta = np.zeros_like(nu)
     tau = np.zeros_like(nu)
 
+    print(f" Starting with spinning data set.")
+
     for t in range(len(inputs)):
+
+        if t == 3000:
+            print(f" Moving to straight data set.")
+            u_ref[2] = 0
+            u_ref[3] = 0
 
         # Computing the full model results (D included)
         v_dot_ord[t] = sam.dynamics(inputs[t], u_ref)[7:13] # This should be replaced with the real measured acceleration later
@@ -127,15 +139,15 @@ if __name__ == "__main__":
     u_ref = np.zeros(6)
     u_ref[0] = 50#*np.sin((i/(20/0.02))*(3*np.pi/4))        # VBS
     u_ref[1] = 50 # LCG
-    #u[2] = np.deg2rad(7)    # Vertical (stern)
-    #u[3] = -np.deg2rad(7)   # Horizontal (rudder)
+    u_ref[2] = np.deg2rad(7)    # Vertical (stern)
+    u_ref[3] = -np.deg2rad(7)   # Horizontal (rudder)
     u_ref[4] = 1000     # RPM 1
     u_ref[5] = u_ref[4]     # RPM 2
 
     # TODO: Maybe generate data here so that it can be easier to change the reference control inputs for now
 
     # Load the generated data
-    data = pd.read_csv("src/smarc_modelling/pinn/data/system_states.csv")
+    data = pd.read_csv("src/smarc_modelling/pinn/data/system_states_spin_and_straight.csv")
     # Pulling out individual stuff from the data
     time = data["Time"].values
     states = data[["x", "y", "z", "q0", "q1", "q2", "q3", "u", "v", "w", "p", "q", "r"]].values
@@ -151,13 +163,13 @@ if __name__ == "__main__":
 
     # Initialize PINN model & optimizer
     model = PINN()
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-3) # TODO: Tune learning rate
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4) # TODO: Tune learning rate
 
     # Adaptive learning rate
     # scheduler = StepLR(optimizer, step_size=1000, gamma=0.75) # TODO: Could be worth having decay on lr
 
     # Training loop
-    epochs = 10000
+    epochs = 50000
     print(f" Starting training...")
     for epoch in range(epochs):
         # Reset gradient
@@ -180,7 +192,7 @@ if __name__ == "__main__":
             print(f" Still training, epoch: {epoch}, loss: {loss.item()}, lr: {optimizer.param_groups[0]['lr']}")
 
         # End early if our loss is small enough
-        if loss.item() < 0.05: # TODO: Tune this
+        if loss.item() < 0.075: # TODO: Tune this
             print(f" Training stopped early due to reaching loss threshold at epoch: {epoch}")
             break
     
@@ -188,7 +200,6 @@ if __name__ == "__main__":
     torch.save(model.state_dict(), "src/smarc_modelling/pinn/models/pinn.pt")
 
     # Quickly testing results
-
     # Evaluation mode
     model.eval()
 
@@ -205,7 +216,7 @@ if __name__ == "__main__":
     # 1. In scenarios where nu is low velocities / zero velocity the dampening matrix will look a bit weird as compared
     # to the model one but when multiplied with the nu again most weird terms become 0 anyways so the real dynamics are represented
     np.set_printoptions(precision=3, suppress=True)
-    print(f" v: \n", nu[-10].detach().numpy())
+    print(f" \n v: \n", nu[-10].detach().numpy())
     print(f" Learned D(v)v as: \n", learned_D @ nu[-10].detach().numpy())
     print(f" Model D(v)v as: \n", sam.D @ nu[-10].detach().numpy())
     print("\n")

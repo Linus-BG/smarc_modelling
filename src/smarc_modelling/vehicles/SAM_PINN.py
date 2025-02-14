@@ -182,7 +182,7 @@ class SAM_PINN():
             self,
             dt=0.02,
             V_current=0,
-            beta_current=0,
+            beta_current=0
     ):
         self.dt = dt # Sim time step, necessary for evaluation of the actuator dynamics
 
