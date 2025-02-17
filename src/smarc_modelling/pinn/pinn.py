@@ -7,7 +7,6 @@ import torch.nn as nn
 import numpy as np
 import pandas as pd
 from smarc_modelling.vehicles.SAM import SAM
-from torch.optim.lr_scheduler import StepLR
 
 # Functions and classes
 class PINN(nn.Module):
@@ -30,6 +29,8 @@ class PINN(nn.Module):
         self.fc4 = nn.Linear(128, 128)
         self.fc5 = nn.Linear(128, 64)
         self.fc6 = nn.Linear(64, 36)
+
+        # 38180 params -> Should have 10x data points (6000 atm...)
 
     def forward(self, x):
         x = torch.relu(self.fc1(x)) # TODO: Check different activation functions
@@ -60,7 +61,11 @@ def loss_function(model, x, Dv_comp, Mv_dot, Cv, g_eta, tau, nu):
     # Calculate data loss
     data_loss = torch.mean((Dv_comp - (torch.bmm(nu.unsqueeze(1), D_pred).squeeze(1)))**2)
 
-    loss = physics_loss + data_loss
+    # L1 norm to encourage sparsity / parsimony  <-- Actually this does not encourage sparsity or parsimony as it only affects the NN structure not the D matrix
+    # NOTE: One way to actually do this would be summing all the elements in the matrix and presenting that as a loss
+    l1_norm = 0 # sum(p.abs().sum() for p in model.parameters())
+
+    loss = physics_loss + data_loss + l1_norm # We value learning the physics over just fitting the data
 
     return loss
 
@@ -163,10 +168,10 @@ if __name__ == "__main__":
 
     # Initialize PINN model & optimizer
     model = PINN()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4) # TODO: Tune learning rate
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01) # TODO: Tune learning rate
 
     # Adaptive learning rate
-    # scheduler = StepLR(optimizer, step_size=1000, gamma=0.75) # TODO: Could be worth having decay on lr
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.9, patience=500, threshold=0.01, min_lr=1e-5)
 
     # Training loop
     epochs = 50000
@@ -186,18 +191,19 @@ if __name__ == "__main__":
         optimizer.step()
 
         # Step the scheduler
-        # scheduler.step()
+        scheduler.step(loss)
 
         if epoch % 500 == 0:
             print(f" Still training, epoch: {epoch}, loss: {loss.item()}, lr: {optimizer.param_groups[0]['lr']}")
 
         # End early if our loss is small enough
-        if loss.item() < 0.075: # TODO: Tune this
+        if loss.item() < 0.1: # TODO: Tune this
             print(f" Training stopped early due to reaching loss threshold at epoch: {epoch}")
             break
     
     # Saving NN
     torch.save(model.state_dict(), "src/smarc_modelling/pinn/models/pinn.pt")
+    print(f"\n Model weights saved to models/pinn.pt")
 
     # Quickly testing results
     # Evaluation mode
