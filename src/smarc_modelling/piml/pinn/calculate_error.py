@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 def get_mse(filepath):
 
-    real_data = pd.read_csv("src/smarc_modelling/piml/pinn/data/system_states_validate.csv") # TODO: Replace with real data instead of model collected
+    real_data = pd.read_csv("src/smarc_modelling/pinn/data/system_states_validate.csv") # TODO: Replace with real data instead of model collected
     state_columns = ["x", "y", "z", "q0", "q1", "q2", "q3", "u", "v", "w", "p", "q", "r"]
     real_time = real_data["Time"].values
     real_states = real_data[state_columns].values
@@ -29,7 +29,7 @@ def plot():
 
 if __name__ == "__main__":
     # Compute Mean Squared Error (MSE)
-    model_mse, _ = get_mse("src/smarc_modelling/piml/pinn/data/system_states_validate.csv")
-    pinn_mse, real_time = get_mse("src/smarc_modelling/piml/pinn/data/pinn_results.csv")
+    model_mse, _ = get_mse("src/smarc_modelling/pinn/data/system_states_validate.csv")
+    pinn_mse, real_time = get_mse("src/smarc_modelling/pinn/data/pinn_results.csv")
     plot()
 

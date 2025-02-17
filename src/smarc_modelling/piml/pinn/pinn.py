@@ -152,7 +152,7 @@ if __name__ == "__main__":
     # TODO: Maybe generate data here so that it can be easier to change the reference control inputs for now
 
     # Load the generated data
-    data = pd.read_csv("src/smarc_modelling/piml/pinn/data/system_states_spin_and_straight.csv")
+    data = pd.read_csv("src/smarc_modelling/pinn/data/system_states_spin_and_straight.csv")
     # Pulling out individual stuff from the data
     time = data["Time"].values
     states = data[["x", "y", "z", "q0", "q1", "q2", "q3", "u", "v", "w", "p", "q", "r"]].values

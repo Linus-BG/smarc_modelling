@@ -274,7 +274,7 @@ class SAM_PINN():
 
         # Loading the NN for prediction of D
         self.pinn_model = PINN()
-        self.pinn_model.load_state_dict(torch.load("src/smarc_modelling/pinn/models/pinn.pt", weights_only=True))
+        self.pinn_model.load_state_dict(torch.load("src/smarc_modelling/piml/pinn/models/pinn.pt", weights_only=True))
         self.pinn_model.eval()
 
     def init_vehicle(self):

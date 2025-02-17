@@ -97,10 +97,10 @@ def run_simulation(t_span, x0, sam):
     state_df = pd.DataFrame(state_data, columns=state_columns)
 
     if pinn and save:
-        state_df.to_csv("src/smarc_modelling/pinn/data/pinn_results.csv", index=False)
+        state_df.to_csv("src/smarc_modelling/piml/pinn/data/pinn_results.csv", index=False)
         print(f" System states saved to pinn_results.csv!")
     if not pinn and save:
-        state_df.to_csv("src/smarc_modelling/pinn/data/system_states.csv", index=False)
+        state_df.to_csv("src/smarc_modelling/piml/pinn/data/system_states.csv", index=False)
         print(f" System states saved to system_output.csv!")
 
     return sol
