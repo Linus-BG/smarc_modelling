@@ -152,7 +152,7 @@ if __name__ == "__main__":
     # TODO: Maybe generate data here so that it can be easier to change the reference control inputs for now
 
     # Load the generated data
-    data = pd.read_csv("src/smarc_modelling/pinn/data/system_states_spin_and_straight.csv")
+    data = pd.read_csv("src/smarc_modelling/piml/data/system_states_spin_and_straight.csv")
     # Pulling out individual stuff from the data
     time = data["Time"].values
     states = data[["x", "y", "z", "q0", "q1", "q2", "q3", "u", "v", "w", "p", "q", "r"]].values
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01) # TODO: Tune learning rate
 
     # Adaptive learning rate
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.9, patience=500, threshold=0.01, min_lr=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.9, patience=1000, threshold=0.01, min_lr=1e-5)
 
     # Training loop
     epochs = 50000
@@ -202,7 +202,7 @@ if __name__ == "__main__":
             break
     
     # Saving NN
-    torch.save(model.state_dict(), "src/smarc_modelling/piml/pinn/models/pinn.pt")
+    torch.save(model.state_dict(), "src/smarc_modelling/piml/models/pinn.pt")
     print(f"\n Model weights saved to models/pinn.pt")
 
     # Quickly testing results

@@ -61,8 +61,11 @@ from scipy.linalg import block_diag
 from smarc_modelling.lib.gnc import *
 
 # MODIFIED TO USE NN TO PREDICT D
-from smarc_modelling.pinn.pinn import PINN
+from smarc_modelling.piml.pinn.pinn import PINN
+from smarc_modelling.piml.bpinn.bpinn import BPINN
+from smarc_modelling.piml.pigp.pigp import GP
 import torch
+import gpytorch
 
 class SolidStructure:
     """
@@ -165,7 +168,7 @@ class Propellers:
 
 
 # Class Vehicle
-class SAM_PINN():
+class SAM_PIML():
     """
     SAM()
         Integrates all subsystems of the Small and Affordable Maritime AUV.
@@ -182,7 +185,8 @@ class SAM_PINN():
             self,
             dt=0.02,
             V_current=0,
-            beta_current=0
+            beta_current=0,
+            piml_type=""
     ):
         self.dt = dt # Sim time step, necessary for evaluation of the actuator dynamics
 
@@ -273,9 +277,35 @@ class SAM_PINN():
         self.gamma = 100 # Scaling factor for numerical stability of quaternion differentiation
 
         # Loading the NN for prediction of D
-        self.pinn_model = PINN()
-        self.pinn_model.load_state_dict(torch.load("src/smarc_modelling/piml/pinn/models/pinn.pt", weights_only=True))
-        self.pinn_model.eval()
+        self.piml_type = piml_type
+
+        if piml_type == "pinn":
+            self.pinn_model = PINN()
+            self.pinn_model.load_state_dict(torch.load("src/smarc_modelling/piml/models/pinn.pt", weights_only=True))
+            self.pinn_model.eval()
+
+        elif piml_type == "bpinn":
+            self.pinn_model = BPINN()
+            self.pinn_model.load_state_dict(torch.load("src/smarc_modelling/piml/models/bpinn.pt", weights_only=True))
+            self.pinn_model.eval()
+
+        elif piml_type == "pigp":
+            self.models = []
+            self.likelihoods = []
+            for i in range(6):
+                # Create a new likelihood and model for each task
+                likelihood = gpytorch.likelihoods.GaussianLikelihood().eval()
+                model = GP(torch.empty(0, 19), None, likelihood)
+                model.eval()
+                
+                # Load the state dictionaries for the model and likelihood
+                likelihood.load_state_dict(torch.load("src/smarc_modelling/piml/models/gp.pt", weights_only=True)["likelihoods"][i])
+                model.load_state_dict(torch.load("src/smarc_modelling/piml/models/gp.pt", weights_only=True)["models"][i])
+                
+                # Append to the lists
+                self.likelihoods.append(likelihood)
+                self.models.append(model)
+
 
     def init_vehicle(self):
         """
@@ -342,6 +372,22 @@ class SAM_PINN():
         self.calculate_tau(u)
 
         nu_dot = self.Minv @ (self.tau - np.matmul(self.C,self.nu_r) - np.matmul(self.D,self.nu_r) - self.g_vec)
+
+        if self.piml_type == "pigp":
+
+            state_x = np.hstack([eta, nu, u])
+            Dv_pred = []
+            with torch.no_grad():
+                for i in range(6):
+                    model = self.models[i]
+                    likelihood = self.likelihoods[i]
+                    # Make prediction
+                    observed_pred = likelihood(model(torch.tensor(state_x, dtype=torch.float32).unsqueeze(0)))
+                    Dv_pred.append(observed_pred.mean.item())
+                print(f"state_x: {state_x}")
+                print(f"Dv_pred: {Dv_pred}")
+            nu_dot = self.Minv @ (self.tau - np.matmul(self.C,self.nu_r) - Dv_pred - self.g_vec)
+        
         u_dot = self.actuator_dynamics(u, u_ref)
         eta_dot = self.eta_dynamics(eta, nu)
         x_dot = np.concatenate([eta_dot, nu_dot, u_dot])
@@ -507,19 +553,35 @@ class SAM_PINN():
         """
         Predict damping
         """
+        if self.piml_type == "pinn" or self.piml_type == "bpinn":
+            # Flatten inputs
+            eta = np.array(eta, dtype=np.float32).flatten()
+            nu = np.array(nu, dtype=np.float32).flatten()
+            u = np.array(u, dtype=np.float32).flatten()
 
-        # Flatten inputs
-        eta = np.array(eta, dtype=np.float32).flatten()
-        nu = np.array(nu, dtype=np.float32).flatten()
-        u = np.array(u, dtype=np.float32).flatten()
+            # Make state vector
+            x = np.concatenate([eta, nu, u], axis=0)
+            x = torch.tensor(x, dtype=torch.float32).unsqueeze(0)
 
-        # Make state vector
-        x = np.concatenate([eta, nu, u], axis=0)
-        x = torch.tensor(x, dtype=torch.float32).unsqueeze(0)
+            # Get prediction
+            D_pred = self.pinn_model(x).detach().numpy()
+            self.D = D_pred.squeeze() # Fix dimensions
+        else:
+            # Nonlinear damping
+            self.D[0,0] = self.Xuu * np.abs(self.nu_r[0])
+            self.D[1,1] = self.Yvv * np.abs(self.nu_r[1])
+            self.D[2,2] = self.Zww * np.abs(self.nu_r[2])
+            self.D[3,3] = self.Kpp * np.abs(self.nu_r[3])
+            self.D[4,4] = self.Mqq * np.abs(self.nu_r[4])
+            self.D[5,5] = self.Nrr * np.abs(self.nu_r[5])
 
-        # Get prediction
-        D_pred = self.pinn_model(x).detach().numpy()
-        self.D = D_pred.squeeze() # Fix dimensions
+            # Cross couplings
+            self.D[4,0] = self.z_cp * self.Xuu * np.abs(self.nu_r[0])
+            self.D[5,0] = -self.y_cp * self.Xuu * np.abs(self.nu_r[0])
+            self.D[3,1] = -self.z_cp * self.Yvv * np.abs(self.nu_r[1])
+            self.D[5,1] = self.x_cp * self.Yvv * np.abs(self.nu_r[1])
+            self.D[3,2] = self.y_cp * self.Zww * np.abs(self.nu_r[2])
+            self.D[4,2] = -self.x_cp * self.Zww * np.abs(self.nu_r[2])
 
     def calculate_g(self):
         """

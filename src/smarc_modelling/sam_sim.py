@@ -2,7 +2,6 @@ import numpy as np
 from smarc_modelling.vehicles import *
 from smarc_modelling.lib import *
 from smarc_modelling.vehicles.SAM import SAM
-from smarc_modelling.vehicles.SAM_PINN import SAM_PINN
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -11,8 +10,10 @@ matplotlib.use('TkAgg')  # or 'Qt5Agg', depending on what you have installed
 
 ## MOD
 import pandas as pd
-pinn = False
+from smarc_modelling.vehicles.SAM_PIML import SAM_PIML
+piml = True
 save = True
+piml_type = "pigp"
 
 # Initial conditions
 eta0 = np.zeros(7)
@@ -30,10 +31,10 @@ n_sim = int(t_span[1]/dt)
 t_eval = np.linspace(t_span[0], t_span[1], n_sim)
 
 # Create SAM instance
-if not pinn:
+if not piml:
     sam = SAM(dt)
-elif pinn:
-    sam = SAM_PINN(dt)
+elif piml:
+    sam = SAM_PIML(dt, piml_type=piml_type)
 
 class Sol():
     """
@@ -96,11 +97,11 @@ def run_simulation(t_span, x0, sam):
     state_data = np.column_stack((t_eval, data.T))
     state_df = pd.DataFrame(state_data, columns=state_columns)
 
-    if pinn and save:
-        state_df.to_csv("src/smarc_modelling/piml/pinn/data/pinn_results.csv", index=False)
-        print(f" System states saved to pinn_results.csv!")
-    if not pinn and save:
-        state_df.to_csv("src/smarc_modelling/piml/pinn/data/system_states.csv", index=False)
+    if piml and save:
+        state_df.to_csv("src/smarc_modelling/piml/data/piml_results.csv", index=False)
+        print(f" System states saved to piml_results.csv!")
+    if not piml and save:
+        state_df.to_csv("src/smarc_modelling/piml/data/system_states.csv", index=False)
         print(f" System states saved to system_output.csv!")
 
     return sol

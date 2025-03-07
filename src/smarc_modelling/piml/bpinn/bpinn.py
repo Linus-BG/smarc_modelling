@@ -9,7 +9,7 @@ import pandas as pd
 from smarc_modelling.vehicles.SAM import SAM
 
 # Functions and classes
-class PINN(nn.Module):
+class BPINN(nn.Module):
 
     """
     Physics informed neural network that currently enforces:
@@ -20,7 +20,7 @@ class PINN(nn.Module):
     """
 
     def __init__(self):
-        super(PINN, self).__init__()
+        super(BPINN, self).__init__()
         # TODO: Just some random layers atm, check more into this later
         # Defining the layers
         self.fc1 = nn.Linear(19, 32) # Neural network takes all 19 inputs for prediction
@@ -32,16 +32,49 @@ class PINN(nn.Module):
 
         # 38180 params -> Should have 10x data points (6000 atm...)
 
+        self.dropout = nn.Dropout(p=0.1)
+
     def forward(self, x):
         x = torch.relu(self.fc1(x)) # TODO: Check different activation functions
+        x = self.dropout(x)
         x = torch.relu(self.fc2(x))
+        x = self.dropout(x)
         x = torch.relu(self.fc3(x))
+        x = self.dropout(x)
         x = torch.relu(self.fc4(x))
+        x = self.dropout(x)
         x = torch.relu(self.fc5(x))
         A_flat = self.fc6(x)
         A_mat = A_flat.view(-1, 6, 6) # Go from just a row of values to matrix
         D = A_mat @ A_mat.transpose(-2, -1) # Enforce symmetry of D matrix
         return D
+    
+    def monte_carlo_forward(self, x, nu, num_samples):
+
+        # Perform forward pass multiple times to gather samples
+        preds = torch.stack([self.forward(x) for _ in range(num_samples)])  # Shape [num_samples, batch_size, 6, 6]
+        
+        # Compute the mean of D predictions
+        D_pred_mean = preds.mean(dim=0)  # Shape [batch_size, 6, 6]
+        
+        # Ensure that nu has the shape [batch_size, 6, 1] for batch matrix multiplication
+        nu_reshaped = nu.unsqueeze(2)  # Shape [batch_size, 6, 1]
+        
+        # Perform matrix multiplication using torch.matmul for batch operation
+        # We want the result to be [batch_size, 6, 1] after multiplication
+        Dv_samples = torch.matmul(D_pred_mean, nu_reshaped)  # Shape [batch_size, 6, 1]
+        
+        # Now squeeze the third dimension to get [batch_size, 6]
+        Dv_samples = Dv_samples.squeeze(2)  # Shape [batch_size, 6]
+        
+        # Compute the mean and variance of D*v across the samples
+        mean_Dv = Dv_samples.mean(dim=0)  # Mean of D*v across samples
+        var_Dv = Dv_samples.var(dim=0)  # Variance of D*v across samples
+        
+        return mean_Dv, var_Dv
+
+
+
     
 
 def loss_function(model, x, Dv_comp, Mv_dot, Cv, g_eta, tau, nu):
@@ -69,6 +102,11 @@ def loss_function(model, x, Dv_comp, Mv_dot, Cv, g_eta, tau, nu):
 
     return loss
 
+def predict_with_uncertainty(model, x, nu, num_samples):
+    model.train() # We stay in training mode to keep dropout enabled for sampling
+    with torch.no_grad():
+        mean_pred, uncertainty = model.monte_carlo_forward(x, nu, num_samples)
+    return mean_pred, uncertainty
 
 def prepare_data(inputs, sam, u_ref):
 
@@ -152,7 +190,7 @@ if __name__ == "__main__":
     # TODO: Maybe generate data here so that it can be easier to change the reference control inputs for now
 
     # Load the generated data
-    data = pd.read_csv("src/smarc_modelling/piml/pinn/data/system_states_spin_and_straight.csv")
+    data = pd.read_csv("src/smarc_modelling/piml/data/system_states_spin_and_straight.csv")
     # Pulling out individual stuff from the data
     time = data["Time"].values
     states = data[["x", "y", "z", "q0", "q1", "q2", "q3", "u", "v", "w", "p", "q", "r"]].values
@@ -166,12 +204,13 @@ if __name__ == "__main__":
     eta, nu, u, Dv_comp, Mv_dot, Cv, g_eta, tau = prepare_data(inputs, sam, u_ref)
     x = torch.cat([eta, nu, u], dim=1)
 
-    # Initialize PINN model & optimizer
-    model = PINN()
+    # Initialize B-PINN model & optimizer
+    model = BPINN()
+    model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01) # TODO: Tune learning rate
 
     # Adaptive learning rate
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.9, patience=500, threshold=0.01, min_lr=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.9, patience=1000, threshold=0.01, min_lr=1e-5)
 
     # Training loop
     epochs = 50000
@@ -202,8 +241,8 @@ if __name__ == "__main__":
             break
     
     # Saving NN
-    torch.save(model.state_dict(), "src/smarc_modelling/piml/pinn/models/pinn.pt")
-    print(f"\n Model weights saved to models/pinn.pt")
+    torch.save(model.state_dict(), "src/smarc_modelling/piml/models/bpinn.pt")
+    print(f"\n Model weights saved to models/bpinn.pt")
 
     # Quickly testing results
     # Evaluation mode
@@ -213,7 +252,7 @@ if __name__ == "__main__":
     x_test = x[-50]
 
     # Get predicted D(v)
-    learned_D = model(x_test).detach().numpy()
+    D_mean, D_std = predict_with_uncertainty(model, x_test, nu, 500)
 
     # Model prediction
     sam.dynamics(x_test.detach().numpy(), u_ref) # Calling this to update D using state x_test
@@ -222,9 +261,10 @@ if __name__ == "__main__":
     # 1. In scenarios where nu is low velocities / zero velocity the dampening matrix will look a bit weird as compared
     # to the model one but when multiplied with the nu again most weird terms become 0 anyways so the real dynamics are represented
     np.set_printoptions(precision=3, suppress=True)
-    print(f" \n v: \n", nu[-10].detach().numpy())
-    print(f" Learned D(v)v as: \n", learned_D @ nu[-10].detach().numpy())
-    print(f" Model D(v)v as: \n", sam.D @ nu[-10].detach().numpy())
-    print("\n")
-    print(f" Learned D(v) as \n", learned_D)
-    print(f" Model D(v) as: \n", sam.D)
+    # print(f" \n v: \n", nu[-10].detach().numpy())
+    # print(f" Learned D(v)v as: \n", learned_D @ nu[-10].detach().numpy())
+    # print(f" Model D(v)v as: \n", sam.D @ nu[-10].detach().numpy())
+    # print("\n")
+    # print(f" Learned D(v) as \n", learned_D)
+    # print(f" Model D(v) as: \n", sam.D)
+    print(f" Mean: \n {D_mean} \n Std: \n {D_std}")
