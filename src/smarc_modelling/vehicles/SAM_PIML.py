@@ -63,7 +63,7 @@ from smarc_modelling.lib.gnc import *
 # MODIFIED TO USE NN TO PREDICT D
 from smarc_modelling.piml.pinn.pinn import PINN
 from smarc_modelling.piml.bpinn.bpinn import BPINN
-from smarc_modelling.piml.pigp.pigp import GP
+from smarc_modelling.piml.pigp.pigp import DeepKernelNN, MultiTaskGP
 import torch
 import gpytorch
 
@@ -290,21 +290,26 @@ class SAM_PIML():
             self.pinn_model.eval()
 
         elif piml_type == "pigp":
-            self.models = []
-            self.likelihoods = []
-            for i in range(6):
-                # Create a new likelihood and model for each task
-                likelihood = gpytorch.likelihoods.GaussianLikelihood().eval()
-                model = GP(torch.empty(0, 19), None, likelihood)
-                model.eval()
-                
-                # Load the state dictionaries for the model and likelihood
-                likelihood.load_state_dict(torch.load("src/smarc_modelling/piml/models/gp.pt", weights_only=True)["likelihoods"][i])
-                model.load_state_dict(torch.load("src/smarc_modelling/piml/models/gp.pt", weights_only=True)["models"][i])
-                
-                # Append to the lists
-                self.likelihoods.append(likelihood)
-                self.models.append(model)
+
+            # Param and dummies
+            num_tasks = 6
+            x_dummy = torch.empty(0, 19)
+
+            # Init model and likelihood
+            likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks)
+            feature_network = DeepKernelNN(64)
+            model = MultiTaskGP(x_dummy, None, likelihood, feature_network)
+            
+            # Load the state dictionaries for the model and likelihood
+            likelihood.load_state_dict(torch.load("src/smarc_modelling/piml/models/gp.pt", weights_only=True)["likelihood"])
+            model.load_state_dict(torch.load("src/smarc_modelling/piml/models/gp.pt", weights_only=True)["model"])
+            feature_network.load_state_dict(torch.load("src/smarc_modelling/piml/models/gp.pt", weights_only=True)["featurenet"])
+            likelihood.eval()
+            model.eval()
+            feature_network.eval()
+
+            self.model = model
+            self.likelihood = likelihood
 
 
     def init_vehicle(self):
@@ -376,16 +381,11 @@ class SAM_PIML():
         if self.piml_type == "pigp":
 
             state_x = np.hstack([eta, nu, u])
-            Dv_pred = []
+
             with torch.no_grad():
-                for i in range(6):
-                    model = self.models[i]
-                    likelihood = self.likelihoods[i]
-                    # Make prediction
-                    observed_pred = likelihood(model(torch.tensor(state_x, dtype=torch.float32).unsqueeze(0)))
-                    Dv_pred.append(observed_pred.mean.item())
-                print(f"state_x: {state_x}")
-                print(f"Dv_pred: {Dv_pred}")
+                prediction = self.likelihood(self.model(torch.tensor(state_x, dtype=torch.float32).unsqueeze(0)))
+                Dv_pred = prediction.mean.numpy() # [6, 1]
+                Dv_pred = Dv_pred.reshape((6,)) # [6, ]
             nu_dot = self.Minv @ (self.tau - np.matmul(self.C,self.nu_r) - Dv_pred - self.g_vec)
         
         u_dot = self.actuator_dynamics(u, u_ref)
