@@ -91,7 +91,8 @@ def prepare_data(data_file="", return_type=""):
             torch.tensor(Mv_dot, dtype=torch.float32),
             torch.tensor(Cv, dtype=torch.float32),
             torch.tensor(g_eta, dtype=torch.float32),
-            torch.tensor(tau, dtype=torch.float32)
+            torch.tensor(tau, dtype=torch.float32),
+            torch.tensor(time, dtype=torch.float32)
         )
     else:
         return(
@@ -102,5 +103,6 @@ def prepare_data(data_file="", return_type=""):
             Mv_dot,
             Cv,
             g_eta,
-            tau
+            tau,
+            time
         )
