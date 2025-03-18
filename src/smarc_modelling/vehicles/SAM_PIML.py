@@ -64,8 +64,11 @@ from smarc_modelling.lib.gnc import *
 from smarc_modelling.piml.pinn.pinn import PINN
 from smarc_modelling.piml.bpinn.bpinn import BPINN
 from smarc_modelling.piml.pigp.pigp import DeepKernelNN, MultiTaskGP
+from smarc_modelling.piml.glnn.glnn import LNN
 import torch
 import gpytorch
+
+from scipy.spatial.transform import Rotation as R
 
 class SolidStructure:
     """
@@ -311,6 +314,13 @@ class SAM_PIML():
             self.model = model
             self.likelihood = likelihood
 
+        elif piml_type == "glnn":
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            self.pinn_model = LNN(n_dof=6, exp_wrt_p=True, device=device)
+            self.pinn_model.load_state_dict(torch.load("src/smarc_modelling/piml/models/glnn.pt", weights_only=True))
+            self.pinn_model.eval()
+
+
 
     def init_vehicle(self):
         """
@@ -377,6 +387,8 @@ class SAM_PIML():
         self.calculate_tau(u)
 
         nu_dot = self.Minv @ (self.tau - np.matmul(self.C,self.nu_r) - np.matmul(self.D,self.nu_r) - self.g_vec)
+        print(nu_dot)
+
 
         if self.piml_type == "pigp":
 
@@ -566,6 +578,19 @@ class SAM_PIML():
             # Get prediction
             D_pred = self.pinn_model(x).detach().numpy()
             self.D = D_pred.squeeze() # Fix dimensions
+
+        if self.piml_type == "glnn":
+            
+            # Convert quat to euler
+            pos = eta[:3]
+            quat = eta[3:]
+            euler = R.from_quat(quat).as_euler("xyz", degrees=False)
+            q = torch.from_numpy(np.hstack([pos, euler])).float().unsqueeze(0)
+            dq = torch.from_numpy(nu).float().unsqueeze(0)
+            _, _, _, _, _, D_pred, _ = self.pinn_model.dynamic_model(q, dq)
+            
+            self.D = D_pred.detach().numpy().squeeze(0)
+
         else:
             # Nonlinear damping
             self.D[0,0] = self.Xuu * np.abs(self.nu_r[0])
