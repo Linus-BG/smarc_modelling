@@ -11,7 +11,7 @@ matplotlib.use('TkAgg')  # or 'Qt5Agg', depending on what you have installed
 ## MOD
 import pandas as pd
 from smarc_modelling.vehicles.SAM_PIML import SAM_PIML
-piml = True
+piml = False
 save = False
 piml_type = "glnn"
 
@@ -38,7 +38,7 @@ t_eval = np.linspace(t_span[0], t_span[1], n_sim)
 
 # Create SAM instance
 if not piml:
-    sam = SAM(dt)
+    sam = SAM_PIML(dt)
 elif piml:
     sam = SAM_PIML(dt, piml_type=piml_type)
 

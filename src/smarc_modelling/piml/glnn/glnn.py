@@ -145,7 +145,6 @@ class EuclideanLayer(nn.Module):
         out = exp_x / (exp_x + 1.0)
         return out
 
-# TODO
 class LNN(nn.Module):
     """
     Geometric LNN, with kinetic energy network on SPD-tangent space.
@@ -241,51 +240,53 @@ class LNN(nn.Module):
 
  
     def dynamic_model(self, q, dq):
-        # q, dq = [40, 6]
+
         y, dy_dq = self.layers_D[0](q, self.eye_mat)
         # tangent space network: n layers + 1 output layer
         for i in range(1, self.n_depth_T_eucl+1):
             y, dy_dq = self.layers_D[i](y, dy_dq)
+
+        # Predicting D
         D, dDdq = self.layers_D[-1](y, dy_dq) # [40, 6, 6]
         d = (D @ dq.unsqueeze(-1)).squeeze(-1) # D(v)v
 
-        # Getting M, C from SAM # TODO: Check independence from u and u_ref
-        u = [0, 0, 0, 0, 0, 0] 
-        u_ref = [0, 0, 0, 0, 0, 0]
-        model_inputs = [q, dq, u]
-        
         M = torch.zeros(len(q), 6, 6)
         C = torch.zeros(len(q), 6, 6)
+        g = torch.zeros(len(q), 6)
 
         for k in range(len(q)):
             # SAM sim needs q in quaternions not euler so we need to convert back
             pos = q[k][:3]
             quat = R.from_euler("xyz", q[k][3:], degrees=False).as_quat()
             q_quat = np.hstack([pos, quat])
+            # Calling SAM just to update M, C and g
             self.sam.dynamics(np.hstack([q_quat, dq[k].numpy(), np.zeros(6)]), np.zeros(6))
 
             # Mass inertia
             M[k, :, :] = torch.from_numpy(self.sam.M)
             # Coriolis
             C[k, :, :] = torch.from_numpy(self.sam.C)
-    
+            # Restoring forces
+            g[k, :] = torch.from_numpy(self.sam.g_vec)
+
         # Should have these shapes
         # C [40, 6, 6]      o   
         # c [40, 6]         o
         # M [40, 6, 6]      o
         # d [40, 6]         o
+        # g [40, 6]         o
 
         c = (C @ dq.unsqueeze(-1)).squeeze(-1)
 
         # kinetic energy
         T = 1. / 2. * (dq.view(-1, 1, self.n_dof) @ M @ dq.view(-1, self.n_dof, 1)).view(-1)
 
-        # potential: energy & forces #TODO: Swap g for sam.g?
+        # potential: energy & forces
         V, der_V = self.layers_V[0](q, self.eye_mat)
         for i in range(1, len(self.layers_V)):
             V, der_V = self.layers_V[i](V, der_V)
         V = V.squeeze(-1)
-        g = der_V.squeeze(-2)
+        #g = der_V.squeeze(-2)
 
         return M, c, g, T, V, D, d
 
@@ -295,7 +296,7 @@ class LNN(nn.Module):
         M, c, g, T, V, D, d = self.dynamic_model(q, dq)
         M_inv = torch.inverse(M)
         # Added D here for full Fossen model
-        ddq_pred = torch.matmul(M_inv, (tau - c - g - d).view(-1, self.n_dof, 1)).view(-1, self.n_dof)
+        ddq_pred = torch.matmul(M_inv, (tau - c - d - g).view(-1, self.n_dof, 1)).view(-1, self.n_dof)
         
         if save_outputs:
             if self.out_M.shape[0] == 0:
